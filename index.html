@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Spain → Albania</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Manrope:wght@300;400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+<style>
+:root {
+  --bg:           #07111f;
+  --bg-mid:       #0d1726;
+  --text:         #f4f1ea;
+  --text-dim:     #aeb8c5;
+  --gold:         #d6b06d;
+  --gold-soft:    rgba(214,176,109,0.55);
+  --gold-faint:   rgba(214,176,109,0.12);
+  --blue-dim:     rgba(111,135,166,0.25);
+  --glass-bg:     rgba(9,19,32,0.72);
+  --glass-border: rgba(214,176,109,0.14);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body {
+  width:100%; height:100%;
+  overflow:hidden;
+  background:var(--bg);
+  font-family:'Manrope',sans-serif;
+}
+#app {
+  position:relative;
+  width:100vw;
+  height:100vh;
+}
+#starCanvas {
+  position:absolute; inset:0;
+  z-index:0;
+}
+#mapSvg {
+  position:absolute; inset:0;
+  width:100%; height:100%;
+  z-index:1;
+  transition:transform 0.6s cubic-bezier(0.25,0.46,0.45,0.94);
+  will-change:transform;
+}
+
+/* panel */
+#panel {
+  position:absolute;
+  bottom:5vh; left:50%;
+  transform:translateX(-50%);
+  z-index:20;
+  background:var(--glass-bg);
+  backdrop-filter:blur(24px) saturate(1.2);
+  -webkit-backdrop-filter:blur(24px) saturate(1.2);
+  border:1px solid var(--glass-border);
+  border-radius:18px;
+  padding:30px 46px 26px;
+  min-width:300px;
+  text-align:center;
+  box-shadow:
+    0 12px 60px rgba(0,0,0,0.55),
+    0 0  120px rgba(214,176,109,0.03),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+  opacity:0;
+  animation:panelFadeIn 1.8s 0.4s ease forwards;
+}
+@keyframes panelFadeIn {
+  from { opacity:0; transform:translateX(-50%) translateY(14px); }
+  to   { opacity:1; transform:translateX(-50%) translateY(0); }
+}
+.p-route {
+  font-size:9.5px; font-weight:500;
+  letter-spacing:0.28em; text-transform:uppercase;
+  color:var(--text-dim); opacity:0.65;
+  margin-bottom:4px;
+}
+.p-dates {
+  font-family:'Cormorant Garamond',serif;
+  font-size:14px; font-weight:300; font-style:italic;
+  color:var(--gold); opacity:0.75;
+  letter-spacing:0.12em;
+  margin-bottom:22px;
+}
+.p-number {
+  font-family:'Cormorant Garamond',serif;
+  font-size:90px; font-weight:300;
+  line-height:1;
+  color:var(--text);
+  letter-spacing:-0.025em;
+  margin-bottom:3px;
+  transition:all 0.4s ease;
+}
+.p-unit {
+  font-size:10px; font-weight:300;
+  letter-spacing:0.35em; text-transform:uppercase;
+  color:var(--text-dim); opacity:0.6;
+  margin-bottom:20px;
+}
+.p-pct {
+  font-family:'Cormorant Garamond',serif;
+  font-size:20px; font-weight:300; font-style:italic;
+  color:var(--gold); opacity:0.9;
+  margin-bottom:16px;
+}
+.p-stats {
+  font-size:9.5px; font-weight:300;
+  letter-spacing:0.14em;
+  color:var(--text-dim); opacity:0.55;
+}
+.p-stats .dot { margin:0 7px; opacity:0.4; }
+
+.p-arrived-title {
+  font-family:'Cormorant Garamond',serif;
+  font-size:58px; font-weight:300; font-style:italic;
+  color:var(--gold);
+  line-height:1;
+  margin-bottom:10px;
+}
+.p-arrived-sub {
+  font-size:10px; font-weight:300;
+  letter-spacing:0.35em; text-transform:uppercase;
+  color:var(--text-dim); opacity:0.55;
+  margin-bottom:18px;
+}
+.p-arrived-foot {
+  font-size:9px; letter-spacing:0.22em;
+  color:var(--text-dim); opacity:0.3;
+}
+
+/* real geography layer */
+.land {
+  fill: rgba(12, 30, 48, 0.74);
+  stroke: rgba(111,135,166,0.23);
+  stroke-width: 0.55;
+  vector-effect: non-scaling-stroke;
+}
+.land-neighbor {
+  fill: rgba(9, 24, 42, 0.52);
+  stroke: rgba(111,135,166,0.13);
+  stroke-width: 0.45;
+  vector-effect: non-scaling-stroke;
+}
+.land-focus {
+  fill: rgba(23, 43, 62, 0.86);
+  stroke: rgba(214,176,109,0.42);
+  stroke-width: 1.05;
+  vector-effect: non-scaling-stroke;
+  filter: url(#fLand);
+}
+.boundary {
+  fill:none;
+  stroke: rgba(174,184,197,0.095);
+  stroke-width: 0.42;
+  vector-effect: non-scaling-stroke;
+}
+.coastline-glow {
+  fill:none;
+  stroke: rgba(214,176,109,0.055);
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
+  filter:url(#fRouteGlowWide);
+}
+.map-lbl {
+  font-family:'Manrope',sans-serif;
+  font-size:8.5px;
+  letter-spacing:0.22em;
+  text-transform:uppercase;
+  fill:rgba(174,184,197,0.48);
+}
+.location-label {
+  font-family:'Manrope',sans-serif;
+  font-size:8.5px;
+  letter-spacing:0.25em;
+  text-transform:uppercase;
+  fill:rgba(244,241,234,0.58);
+}
+
+/* pulsing rings */
+@keyframes pulseRing {
+  0%   { r:9;  opacity:0.35; }
+  100% { r:22; opacity:0; }
+}
+.pulse-ring {
+  animation: pulseRing 2.8s ease-out infinite;
+  fill:none; stroke:rgba(214,176,109,0.5); stroke-width:1;
+}
+.pulse-ring2 {
+  animation: pulseRing 2.8s 1.4s ease-out infinite;
+  fill:none; stroke:rgba(214,176,109,0.35); stroke-width:1;
+}
+
+/* plane float */
+@keyframes planeFloat {
+  0%,100% { transform:translateY(0px); }
+  50%      { transform:translateY(-2.5px); }
+}
+#planeInner { animation: planeFloat 3.2s ease-in-out infinite; }
+
+/* route glow pulse */
+@keyframes routePulse {
+  0%,100% { opacity:0.7; }
+  50%      { opacity:1; }
+}
+#routeGlowLayer { animation: routePulse 3s ease-in-out infinite; }
+
+/* ambient glow shift */
+@keyframes ambientShift {
+  0%,100% { opacity:0.55; }
+  50%      { opacity:0.78; }
+}
+#ambientGlow { animation: ambientShift 6s ease-in-out infinite; }
+
+@media (max-width:600px) {
+  #panel { width:88vw; padding:24px 28px 20px; bottom:3vh; }
+  .p-number { font-size:72px; }
+  .p-arrived-title { font-size:48px; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="starCanvas"></canvas>
+
+  <svg id="mapSvg" viewBox="0 0 1100 580"
+       preserveAspectRatio="xMidYMid meet"
+       xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="seaGlow" cx="50%" cy="62%" r="45%">
+        <stop offset="0%"   stop-color="rgba(22,46,80,0.45)"/>
+        <stop offset="100%" stop-color="rgba(7,17,31,0)"/>
+      </radialGradient>
+
+      <radialGradient id="goldGlow" cx="50%" cy="48%" r="40%">
+        <stop offset="0%"   stop-color="rgba(214,176,109,0.07)"/>
+        <stop offset="100%" stop-color="rgba(7,17,31,0)"/>
+      </radialGradient>
+
+      <radialGradient id="markerHalo" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   stop-color="rgba(214,176,109,0.28)"/>
+        <stop offset="100%" stop-color="rgba(214,176,109,0)"/>
+      </radialGradient>
+
+      <linearGradient id="routeGrad" gradientUnits="userSpaceOnUse"
+                      x1="195" y1="292" x2="882" y2="268">
+        <stop offset="0%"   stop-color="#d6b06d"/>
+        <stop offset="60%"  stop-color="#e0bc7a"/>
+        <stop offset="100%" stop-color="#d6b06d"/>
+      </linearGradient>
+
+      <filter id="fRouteGlow" x="-15%" y="-150%" width="130%" height="400%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+
+      <filter id="fRouteGlowWide" x="-20%" y="-200%" width="140%" height="500%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="8"/>
+      </filter>
+
+      <filter id="fPointGlow" x="-100%" y="-100%" width="300%" height="300%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+
+      <filter id="fPlaneGlow" x="-100%" y="-100%" width="300%" height="300%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+
+      <filter id="fLand" x="-8%" y="-8%" width="116%" height="116%">
+        <feDropShadow dx="0" dy="1" stdDeviation="3" flood-color="rgba(0,0,0,0.42)"/>
+      </filter>
+    </defs>
+
+    <ellipse cx="550" cy="360" rx="520" ry="185" fill="url(#seaGlow)"/>
+    <ellipse id="ambientGlow" cx="540" cy="295" rx="420" ry="160" fill="url(#goldGlow)"/>
+
+    <!-- Real projected map layer. Filled by D3 from Natural Earth / world-atlas. -->
+    <g id="geoLayer" opacity="0"></g>
+
+    <!-- graceful fallback if external map data cannot load -->
+    <g id="fallbackLand" filter="url(#fLand)" opacity="0.38">
+      <path fill="#0c1e30" stroke="rgba(111,135,166,0.18)" stroke-width="0.7"
+            d="M155 206 C190 160 247 144 312 164 C346 175 364 203 355 239 C344 284 311 325 265 357 C222 388 174 396 136 371 C100 348 97 294 116 252 C126 231 139 217 155 206 Z"/>
+      <path fill="#0b1d2e" stroke="rgba(111,135,166,0.18)" stroke-width="0.7"
+            d="M425 130 C504 108 588 119 665 153 C733 183 787 229 815 286 C841 340 825 398 775 425 C718 456 651 432 612 384 C584 350 568 312 557 268 C546 225 523 176 482 152 C462 140 443 134 425 130 Z"/>
+      <path fill="#09182a" stroke="rgba(111,135,166,0.1)" stroke-width="0.6"
+            d="M20 465 C180 441 384 430 593 434 C807 438 978 451 1100 467 L1100 580 L20 580 Z"/>
+    </g>
+
+    <g stroke="rgba(111,135,166,0.045)" stroke-width="0.7" fill="none">
+      <path d="M 355 335 C 435 327 520 323 605 326 C 690 329 768 337 832 343"/>
+      <path d="M 372 358 C 450 351 535 348 618 350 C 702 353 778 360 840 368"/>
+      <path d="M 390 380 C 465 374 548 372 630 374 C 712 376 786 382 845 390"/>
+      <path d="M 330 312 C 412 305 502 301 592 304 C 682 307 762 315 828 320"/>
+    </g>
+
+    <path id="routeRef"
+          d="M 238 302 C 390 168 705 156 862 286"
+          fill="none" stroke="none" visibility="hidden"/>
+
+    <path id="routeFull"
+          d="M 238 302 C 390 168 705 156 862 286"
+          fill="none"
+          stroke="rgba(111,135,166,0.22)"
+          stroke-width="1.4"
+          stroke-dasharray="5 4"/>
+
+    <path id="routeGlowWide"
+          d="M 238 302 C 390 168 705 156 862 286"
+          fill="none"
+          stroke="rgba(214,176,109,0.18)"
+          stroke-width="10"
+          filter="url(#fRouteGlowWide)"
+          stroke-dasharray="0 9999"/>
+
+    <path id="routeGlowLayer"
+          d="M 238 302 C 390 168 705 156 862 286"
+          fill="none"
+          stroke="rgba(214,176,109,0.45)"
+          stroke-width="4"
+          filter="url(#fRouteGlow)"
+          stroke-dasharray="0 9999"/>
+
+    <path id="routeLine"
+          d="M 238 302 C 390 168 705 156 862 286"
+          fill="none"
+          stroke="url(#routeGrad)"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-dasharray="0 9999"/>
+
+    <g id="particles"></g>
+
+    <g id="spainMarker" transform="translate(238 302)">
+      <ellipse rx="38" ry="38" fill="url(#markerHalo)" opacity="0.5"/>
+      <circle class="pulse-ring" r="9"/>
+      <circle class="pulse-ring2" r="9"/>
+      <circle r="5.5" fill="rgba(214,176,109,0.2)" filter="url(#fPointGlow)"/>
+      <circle r="3.5" fill="#d6b06d" filter="url(#fPointGlow)"/>
+      <circle r="2" fill="#f0d495"/>
+    </g>
+
+    <g id="albaniaMarker" transform="translate(862 286)">
+      <ellipse rx="38" ry="38" fill="url(#markerHalo)" opacity="0.5"/>
+      <circle class="pulse-ring" r="9" style="animation-delay:0.5s"/>
+      <circle class="pulse-ring2" r="9" style="animation-delay:1.9s"/>
+      <circle r="5.5" fill="rgba(214,176,109,0.2)" filter="url(#fPointGlow)"/>
+      <circle r="3.5" fill="#d6b06d" filter="url(#fPointGlow)"/>
+      <circle r="2" fill="#f0d495"/>
+    </g>
+
+    <text id="spainLabel" x="238" y="331" class="location-label" text-anchor="middle">SPAIN</text>
+    <text id="albaniaLabel" x="884" y="274" class="location-label" text-anchor="start">ALBANIA</text>
+
+    <g id="planeGroup" filter="url(#fPlaneGlow)">
+      <g id="planeInner">
+        <path d="M 10 0 L -6 -3.8 L -8 0 L -6 3.8 Z
+                 M -2 -3.8 L 3 -9.5 L 5 -3.8 Z
+                 M -2  3.8 L 3  9.5 L 5  3.8 Z
+                 M -8 -2 L -12 -3 L -12 3 L -8 2 Z"
+              fill="rgba(214,176,109,0.35)" transform="scale(1.5 1.5)"/>
+        <path d="M 10 0 L -6 -3.8 L -8 0 L -6 3.8 Z
+                 M -2 -3.8 L 3 -9.5 L 5 -3.8 Z
+                 M -2  3.8 L 3  9.5 L 5  3.8 Z
+                 M -8 -2 L -12 -3 L -12 3 L -8 2 Z"
+              fill="#d6b06d"/>
+        <circle cx="7" cy="0" r="1.2" fill="rgba(255,235,185,0.7)"/>
+      </g>
+    </g>
+  </svg>
+
+  <div id="panel">
+    <div class="p-route">Spain → Albania</div>
+    <div class="p-dates">Jan 30 — Jul 11</div>
+    <div id="pNumber" class="p-number">—</div>
+    <div id="pUnit"   class="p-unit">days left</div>
+    <div id="pPct"    class="p-pct">—</div>
+    <div class="p-stats">
+      <span id="sPassed">—</span>
+      <span class="dot">·</span>
+      <span id="sLeft">—</span>
+      <span class="dot">·</span>
+      <span id="sPct">—</span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* CONFIGURATION */
+const START_DATE  = new Date('2026-01-30T00:00:00');
+const END_DATE    = new Date('2026-07-11T00:00:00');
+const FROM_LABEL  = 'Spain';
+const TO_LABEL    = 'Albania';
+
+// Marker coordinates. Madrid and Tirana are used so the route reads correctly.
+const SPAIN_COORD   = [-3.7038, 40.4168];
+const ALBANIA_COORD = [19.8189, 41.3275];
+
+/* STARS + BACKGROUND */
+const canvas = document.getElementById('starCanvas');
+const ctx    = canvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+const STAR_COUNT = 220;
+const starData   = [];
+for (let i = 0; i < STAR_COUNT; i++) {
+  starData.push({
+    x:      Math.random(),
+    y:      Math.random(),
+    r:      Math.random() * 1.15 + 0.15,
+    base:   Math.random() * 0.55 + 0.1,
+    speed:  Math.random() * 0.22 + 0.04,
+    phase:  Math.random() * Math.PI * 2,
+  });
+}
+
+let t = 0;
+function animateStars() {
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const bg = ctx.createRadialGradient(W*0.5, H*0.38, 0, W*0.5, H*0.38, W*0.75);
+  bg.addColorStop(0,   '#0e1d2f');
+  bg.addColorStop(0.45,'#091624');
+  bg.addColorStop(1,   '#07111f');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const warm = ctx.createRadialGradient(W*0.5, H*0.45, 0, W*0.5, H*0.45, W*0.35);
+  warm.addColorStop(0,   'rgba(214,176,109,0.032)');
+  warm.addColorStop(1,   'rgba(7,17,31,0)');
+  ctx.fillStyle = warm;
+  ctx.fillRect(0, 0, W, H);
+
+  t += 0.008;
+  for (const s of starData) {
+    const twinkle = 0.72 + 0.28 * Math.sin(t * s.speed + s.phase);
+    ctx.beginPath();
+    ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(240,236,226,${s.base * twinkle})`;
+    ctx.fill();
+  }
+  requestAnimationFrame(animateStars);
+}
+animateStars();
+
+/* REAL MAP LAYER */
+async function loadRealMap() {
+  const geoLayer = d3.select('#geoLayer');
+
+  try {
+    const world = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+    const countries = topojson.feature(world, world.objects.countries).features;
+
+    const lonMin = -20, lonMax = 34, latMin = 24, latMax = 52;
+    const region = countries.filter(f => {
+      const b = d3.geoBounds(f);
+      return b[1][0] > lonMin && b[0][0] < lonMax && b[1][1] > latMin && b[0][1] < latMax;
+    });
+
+    // Use a deliberate cinematic framing instead of fitting the entire region.
+    // This keeps Spain clearly on the left and Albania clearly on the right,
+    // with the route spanning most of the composition.
+    const projection = d3.geoMercator()
+      .center([8.5, 40.0])
+      .scale(1500)
+      .translate([550, 290])
+      .precision(0.1);
+
+    const path = d3.geoPath(projection);
+
+    const spainId = '724';
+    const albaniaId = '008';
+    const regionIds = new Set(region.map(f => String(f.id)));
+
+    geoLayer.selectAll('*').remove();
+
+    const glowMesh = topojson.mesh(world, world.objects.countries, (a, b) => {
+      return a !== b && regionIds.has(String(a.id)) && regionIds.has(String(b.id));
+    });
+
+    geoLayer.append('path')
+      .datum({ type:'FeatureCollection', features: region })
+      .attr('class', 'coastline-glow')
+      .attr('d', path);
+
+    geoLayer.selectAll('path.country')
+      .data(region)
+      .join('path')
+      .attr('class', d => (String(d.id) === spainId || String(d.id) === albaniaId) ? 'land-focus country' : 'land-neighbor country')
+      .attr('d', path);
+
+    geoLayer.append('path')
+      .datum(glowMesh)
+      .attr('class', 'boundary')
+      .attr('d', path);
+
+    geoLayer.transition().duration(900).attr('opacity', 1);
+    d3.select('#fallbackLand').transition().duration(700).attr('opacity', 0);
+
+    const sp = projection(SPAIN_COORD);
+    const al = projection(ALBANIA_COORD);
+
+    if (sp && al) {
+      setRouteFromPoints(sp, al);
+    }
+  } catch (err) {
+    // Keep the fallback composition; route and timer still work.
+    console.warn('Map data could not be loaded. Using fallback map.', err);
+    d3.select('#fallbackLand').transition().duration(900).attr('opacity', 0.48);
+    recalcPathLength();
+  }
+}
+
+function setRouteFromPoints(sp, al) {
+  const dx = al[0] - sp[0];
+  const highY = Math.min(sp[1], al[1]) - 118;
+
+  const c1 = [sp[0] + dx * 0.28, highY - 10];
+  const c2 = [sp[0] + dx * 0.72, highY - 4];
+
+  const d = `M ${sp[0].toFixed(2)} ${sp[1].toFixed(2)} C ${c1[0].toFixed(2)} ${c1[1].toFixed(2)} ${c2[0].toFixed(2)} ${c2[1].toFixed(2)} ${al[0].toFixed(2)} ${al[1].toFixed(2)}`;
+
+  [routeRef, routeFull, routeLine, routeGlowLayer, routeGlowWide].forEach(el => el.setAttribute('d', d));
+
+  document.getElementById('routeGrad').setAttribute('x1', sp[0]);
+  document.getElementById('routeGrad').setAttribute('y1', sp[1]);
+  document.getElementById('routeGrad').setAttribute('x2', al[0]);
+  document.getElementById('routeGrad').setAttribute('y2', al[1]);
+
+  document.getElementById('spainMarker').setAttribute('transform', `translate(${sp[0].toFixed(2)} ${sp[1].toFixed(2)})`);
+  document.getElementById('albaniaMarker').setAttribute('transform', `translate(${al[0].toFixed(2)} ${al[1].toFixed(2)})`);
+
+  const spainLabel = document.getElementById('spainLabel');
+  spainLabel.setAttribute('x', sp[0].toFixed(2));
+  spainLabel.setAttribute('y', (sp[1] + 31).toFixed(2));
+
+  const albaniaLabel = document.getElementById('albaniaLabel');
+  albaniaLabel.setAttribute('x', (al[0] + 21).toFixed(2));
+  albaniaLabel.setAttribute('y', (al[1] - 10).toFixed(2));
+
+  recalcPathLength();
+}
+
+/* ROUTE + PLANE */
+const routeRef       = document.getElementById('routeRef');
+const routeFull      = document.getElementById('routeFull');
+const routeLine      = document.getElementById('routeLine');
+const routeGlowLayer = document.getElementById('routeGlowLayer');
+const routeGlowWide  = document.getElementById('routeGlowWide');
+const planeGroup     = document.getElementById('planeGroup');
+const particlesG     = document.getElementById('particles');
+
+let pathLength = 0;
+let timerStarted = false;
+
+window.addEventListener('load', () => {
+  recalcPathLength();
+  createParticles();
+  tick();
+  setInterval(tick, 1000);
+  loadRealMap();
+});
+
+function recalcPathLength() {
+  pathLength = routeRef.getTotalLength();
+  tick();
+}
+
+/* particles */
+const PARTICLE_N = 7;
+const particles  = [];
+function createParticles() {
+  for (let i = 0; i < PARTICLE_N; i++) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    el.setAttribute('r','1.8');
+    el.setAttribute('fill','rgba(214,176,109,0.9)');
+    el.setAttribute('opacity','0');
+    particlesG.appendChild(el);
+    particles.push({
+      el,
+      t:     (i / PARTICLE_N),
+      speed: 0.00022 + Math.random() * 0.00012,
+    });
+  }
+}
+
+function updateParticles(progress) {
+  if (pathLength === 0 || progress <= 0) {
+    particles.forEach(p => p.el.setAttribute('opacity','0'));
+    return;
+  }
+  particles.forEach(p => {
+    p.t = (p.t + p.speed) % progress;
+    const dist = pathLength * p.t;
+    const pt   = routeRef.getPointAtLength(dist);
+    const rel  = p.t / progress;
+    const fade = Math.sin(rel * Math.PI);
+    p.el.setAttribute('cx', pt.x);
+    p.el.setAttribute('cy', pt.y);
+    p.el.setAttribute('opacity', (fade * 0.75).toFixed(3));
+  });
+}
+
+function positionPlane(progress) {
+  if (pathLength === 0) return;
+  const clamped = Math.max(0, Math.min(1, progress));
+  const dist    = pathLength * clamped;
+  const pt      = routeRef.getPointAtLength(dist);
+
+  const DELTA   = 3;
+  const ptA     = routeRef.getPointAtLength(Math.max(0, dist - DELTA));
+  const ptB     = routeRef.getPointAtLength(Math.min(pathLength, dist + DELTA));
+  const angle   = Math.atan2(ptB.y - ptA.y, ptB.x - ptA.x) * (180 / Math.PI);
+
+  planeGroup.setAttribute('transform',
+    `translate(${pt.x.toFixed(2)} ${pt.y.toFixed(2)}) rotate(${angle.toFixed(2)})`);
+}
+
+function updateRoute(progress) {
+  if (pathLength === 0) return;
+  const done = pathLength * progress;
+  const rest = pathLength - done;
+  const da   = `${done.toFixed(2)} ${rest.toFixed(2)}`;
+
+  routeLine.setAttribute('stroke-dasharray', da);
+  routeGlowLayer.setAttribute('stroke-dasharray', da);
+  routeGlowWide.setAttribute('stroke-dasharray', da);
+}
+
+/* COUNTDOWN LOGIC */
+const MS_DAY  = 1000 * 60 * 60 * 24;
+const TOTAL   = END_DATE - START_DATE;
+let   arrived = false;
+
+function getProgress(now) {
+  return Math.max(0, Math.min(1, (now - START_DATE) / TOTAL));
+}
+
+function tick() {
+  const now      = new Date();
+  const progress = getProgress(now);
+
+  positionPlane(progress);
+  updateRoute(progress);
+  updateParticles(progress);
+
+  const elapsed   = now - START_DATE;
+  const remaining = END_DATE - now;
+  const dPassed   = Math.max(0, Math.floor(elapsed   / MS_DAY));
+  const dLeft     = Math.max(0, Math.ceil (remaining / MS_DAY));
+  const pct       = Math.round(progress * 100);
+
+  if (now >= END_DATE) {
+    if (!arrived) {
+      arrived = true;
+      renderArrived();
+    }
+    return;
+  }
+
+  if (now < START_DATE) {
+    const totalD = Math.round(TOTAL / MS_DAY);
+    setPanel(totalD, 'days to go', '0% complete',
+             '0d passed', totalD + 'd left', '0%');
+    return;
+  }
+
+  setPanel(dLeft, 'days left', pct + '% complete',
+           dPassed + 'd passed', dLeft + 'd left', pct + '%');
+}
+
+function setPanel(num, unit, pct, passed, left, p) {
+  document.getElementById('pNumber').textContent = num;
+  document.getElementById('pUnit').textContent   = unit;
+  document.getElementById('pPct').textContent    = pct;
+  document.getElementById('sPassed').textContent = passed;
+  document.getElementById('sLeft').textContent   = left;
+  document.getElementById('sPct').textContent    = p;
+}
+
+function renderArrived() {
+  const panel = document.getElementById('panel');
+  panel.innerHTML = `
+    <div class="p-arrived-title">arrived</div>
+    <div class="p-arrived-sub">the wait is over</div>
+    <div class="p-arrived-foot" style="margin-top:18px">
+      Spain → Albania &nbsp;·&nbsp; Jul 11
+    </div>`;
+  panel.style.boxShadow =
+    '0 12px 80px rgba(0,0,0,0.55), 0 0 160px rgba(214,176,109,0.09), inset 0 1px 0 rgba(255,255,255,0.04)';
+}
+
+/* SUBTLE PARALLAX */
+const mapSvg = document.getElementById('mapSvg');
+let mouseTarget = {x:0, y:0};
+let mouseCurrent = {x:0, y:0};
+
+document.addEventListener('mousemove', e => {
+  mouseTarget.x = (e.clientX / window.innerWidth  - 0.5) * 9;
+  mouseTarget.y = (e.clientY / window.innerHeight - 0.5) * 5;
+});
+
+function parallaxLoop() {
+  mouseCurrent.x += (mouseTarget.x - mouseCurrent.x) * 0.06;
+  mouseCurrent.y += (mouseTarget.y - mouseCurrent.y) * 0.06;
+  mapSvg.style.transform =
+    `translate(${mouseCurrent.x.toFixed(2)}px, ${mouseCurrent.y.toFixed(2)}px)`;
+  requestAnimationFrame(parallaxLoop);
+}
+parallaxLoop();
+</script>
+</body>
+</html>
